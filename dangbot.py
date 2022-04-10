@@ -42,6 +42,8 @@ from torch.nn import CrossEntropyLoss
 from sklearn.model_selection import train_test_split
 import torch.nn.functional as F
 
+from preprocess.b23 import B23WTF
+
 PAD = '[PAD]'
 pad_id = 0
 
@@ -69,6 +71,9 @@ class DangBot(Updater):
         self.model = self.model.to(self.device)
         self.model.eval()
         self.history = []
+
+        # B23WTF
+        self.b23wtf = B23WTF()
 
     def get_response(self, query: str) -> str:
         """
@@ -132,7 +137,12 @@ def inlinequery(update: Update, context: CallbackContext, bot: DangBot) -> None:
             id=str(uuid4()),
             title="党主席心系群众",
             input_message_content=InputTextMessageContent(bot.get_response(query)),
-        )
+        ),
+        InlineQueryResultArticle(
+            id=str(uuid4()),
+            title="B23去追踪",
+            input_message_content=InputTextMessageContent(bot.b23wtf.wtf(query)),
+        ),
     ]
 
     update.inline_query.answer(results)
