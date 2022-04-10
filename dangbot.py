@@ -73,44 +73,47 @@ class DangBot(Updater):
         self.history = []
 
         # B23WTF
-        self.b23wtf = B23WTF()
+        self.b23 = B23WTF()
 
     def get_response(self, query: str) -> str:
         """
         Get a response from the model.
         """
-        text_ids = self.tokenizer.encode(query, add_special_tokens=False)
-        self.history.append(text_ids)
-        input_ids = [self.tokenizer.cls_token_id]
+        # Check if the input query is a b23 url
+        if not self.b23.valid(query):
+            text_ids = self.tokenizer.encode(query, add_special_tokens=False)
+            self.history.append(text_ids)
+            input_ids = [self.tokenizer.cls_token_id]
 
-        for history_id, history_utr in enumerate(self.history[-self.args.max_history_len:]):
-            input_ids.extend(history_utr)
-            input_ids.append(self.tokenizer.sep_token_id)
+            for history_id, history_utr in enumerate(self.history[-self.args.max_history_len:]):
+                input_ids.extend(history_utr)
+                input_ids.append(self.tokenizer.sep_token_id)
 
-        input_ids = torch.tensor(input_ids).long().to(self.device)
-        input_ids = input_ids.unsqueeze(0)
-        response = []  # 根据context，生成的response
+            input_ids = torch.tensor(input_ids).long().to(self.device)
+            input_ids = input_ids.unsqueeze(0)
+            response = []  # 根据context，生成的response
 
-        for _ in range(self.args.max_len):
-            outputs = self.model(input_ids=input_ids)
-            logits = outputs.logits
-            next_token_logits = logits[0, -1, :]
-            # 对于已生成的结果generated中的每个token添加一个重复惩罚项，降低其生成概率
-            for id in set(response):
-                next_token_logits[id] /= self.args.repetition_penalty
-            next_token_logits = next_token_logits / self.args.temperature
-            # 对于[UNK]的概率设为无穷小，也就是说模型的预测结果不可能是[UNK]这个token
-            next_token_logits[self.tokenizer.convert_tokens_to_ids('[UNK]')] = -float('Inf')
-            filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=self.args.topk, top_p=self.args.topp)
-            # torch.multinomial表示从候选集合中无放回地进行抽取num_samples个元素，权重越高，抽到的几率越高，返回元素的下标
-            next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
-            if next_token == self.tokenizer.sep_token_id:  # 遇到[SEP]则表明response生成结束
-                break
-            response.append(next_token.item())
-            input_ids = torch.cat((input_ids, next_token.unsqueeze(0)), dim=1)
-        self.history.append(response)
-        reply = self.tokenizer.convert_ids_to_tokens(response)
-        return "".join(reply)
+            for _ in range(self.args.max_len):
+                outputs = self.model(input_ids=input_ids)
+                logits = outputs.logits
+                next_token_logits = logits[0, -1, :]
+                # 对于已生成的结果generated中的每个token添加一个重复惩罚项，降低其生成概率
+                for id in set(response):
+                    next_token_logits[id] /= self.args.repetition_penalty
+                next_token_logits = next_token_logits / self.args.temperature
+                # 对于[UNK]的概率设为无穷小，也就是说模型的预测结果不可能是[UNK]这个token
+                next_token_logits[self.tokenizer.convert_tokens_to_ids('[UNK]')] = -float('Inf')
+                filtered_logits = top_k_top_p_filtering(next_token_logits, top_k=self.args.topk, top_p=self.args.topp)
+                # torch.multinomial表示从候选集合中无放回地进行抽取num_samples个元素，权重越高，抽到的几率越高，返回元素的下标
+                next_token = torch.multinomial(F.softmax(filtered_logits, dim=-1), num_samples=1)
+                if next_token == self.tokenizer.sep_token_id:  # 遇到[SEP]则表明response生成结束
+                    break
+                response.append(next_token.item())
+                input_ids = torch.cat((input_ids, next_token.unsqueeze(0)), dim=1)
+            self.history.append(response)
+            reply = self.tokenizer.convert_ids_to_tokens(response)
+            return "".join(reply)
+        return query
 
 
 # Define a few command handlers. These usually take the two arguments update and
@@ -141,7 +144,7 @@ def inlinequery(update: Update, context: CallbackContext, bot: DangBot) -> None:
         InlineQueryResultArticle(
             id=str(uuid4()),
             title="B23去追踪",
-            input_message_content=InputTextMessageContent(bot.b23wtf.wtf(query)),
+            input_message_content=InputTextMessageContent(bot.b23.wtf(query)),
         ),
     ]
 
