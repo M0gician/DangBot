@@ -2,6 +2,22 @@
 # pylint: disable=C0116,W0613
 # This program is dedicated to the public domain under the CC0 license.
 
+MODELS = [
+    # {
+    #     'title': '党主席心系群众',
+    #     'descr': None,
+    #     'model': './epoch20',
+    # },
+    {
+        'title': '',
+        'descr': '',
+        'model': '',
+    }
+]
+TOKEN = "" # Telegram Bot Token
+# KWARGS = {'proxy_url': 'socks5h://xx:1080'}
+KWARGS = None # Other request kwargs like timeout, proxy, etc.
+
 """
 Inline TelegramBot. Shamelessly copied from https://github.com/python-telegram-bot/python-telegram-bot/blob/master/examples/inlinebot.py
 
@@ -9,7 +25,9 @@ Usage:
 Basic inline bot example. Applies different text transformations.
 Press Ctrl-C on the command line or send a signal to the process to stop the
 bot.
+Just edit consts above and run the file.
 """
+from ast import arg
 import logging
 from uuid import uuid4
 from functools import partial
@@ -49,15 +67,17 @@ pad_id = 0
 
 # Enable logging
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.DEBUG,
+    # filename='dangbot.log'
 )
 
 logger = logging.getLogger(__name__)
 
+updater = Updater(TOKEN, request_kwargs=KWARGS)
+b23 = B23WTF()
 
-class DangBot(Updater):
-    def __init__(self, Token: str, args: dict) -> None:
-        Updater.__init__(self, Token)
+class DangBot:
+    def __init__(self, args: dict, model_path: str) -> None:
         self.args = args
         self.logger = create_logger(self.args)
         self.args.cuda = torch.cuda.is_available() and not self.args.no_cuda
@@ -67,20 +87,17 @@ class DangBot(Updater):
         os.environ["CUDA_VISIBLE_DEVICES"] = self.args.device
 
         self.tokenizer = BertTokenizerFast(vocab_file=self.args.vocab_path, sep_token="[SEP]", pad_token="[PAD]", cls_token="[CLS]")
-        self.model = GPT2LMHeadModel.from_pretrained(self.args.model_path)
+        self.model = GPT2LMHeadModel.from_pretrained(model_path)
         self.model = self.model.to(self.device)
         self.model.eval()
         self.history = []
-
-        # B23WTF
-        self.b23 = B23WTF()
 
     def get_response(self, query: str) -> str:
         """
         Get a response from the model.
         """
         # Check if the input query is a b23 url
-        if not self.b23.valid(query):
+        if not b23.valid(query):
             text_ids = self.tokenizer.encode(query, add_special_tokens=False)
             self.history.append(text_ids)
             input_ids = [self.tokenizer.cls_token_id]
@@ -112,9 +129,9 @@ class DangBot(Updater):
                 input_ids = torch.cat((input_ids, next_token.unsqueeze(0)), dim=1)
             self.history.append(response)
             reply = self.tokenizer.convert_ids_to_tokens(response)
+            logging.info('in: {}, reply: {}'.format(query, "".join(reply)))
             return "".join(reply)
         return query
-
 
 # Define a few command handlers. These usually take the two arguments update and
 # context. Error handlers also receive the raised TelegramError object in error.
@@ -128,25 +145,24 @@ def help_command(update: Update, context: CallbackContext) -> None:
     update.message.reply_text('别叫!')
 
 
-def inlinequery(update: Update, context: CallbackContext, bot: DangBot) -> None:
+def inlinequery(update: Update, context: CallbackContext, bots: tuple[DangBot]) -> None:
     """Handle the inline query."""
     query = update.inline_query.query
 
     if query == "":
         return
 
-    results = [
-        InlineQueryResultArticle(
-            id=str(uuid4()),
-            title="党主席心系群众",
-            input_message_content=InputTextMessageContent(bot.get_response(query)),
-        ),
-        InlineQueryResultArticle(
-            id=str(uuid4()),
-            title="B23去追踪",
-            input_message_content=InputTextMessageContent(bot.b23.wtf(query)),
-        ),
-    ]
+    results = [InlineQueryResultArticle(
+        id=str(uuid4()),
+        title=info['title'],
+        description=info['descr'],
+        input_message_content=InputTextMessageContent(bot.get_response(query).replace('#', '')),
+    ) for bot, info in bots]
+    results.append(InlineQueryResultArticle(
+        id=str(uuid4()),
+        title="B23去追踪",
+        input_message_content=InputTextMessageContent(b23.wtf(query)),
+    ))
 
     update.inline_query.answer(results)
 
@@ -239,21 +255,18 @@ def main() -> None:
 
     """Run the bot."""
     # Create the Updater and pass it your bot's token.
-    updater = DangBot(
-        Token="TOKEN",
-        args=args
-    )
+    bots = tuple((DangBot(args, item['model']), item) for item in MODELS)
 
     # Get the dispatcher to register handlers
     dispatcher = updater.dispatcher
 
     # on different commands - answer in Telegram
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("help", help_command))
+    dispatcher.add_handler(CommandHandler("start", start, run_async=True))
+    dispatcher.add_handler(CommandHandler("help", help_command, run_async=True))
 
     # on non command i.e message - echo the message on Telegram
-    inlinequeryfunc = partial(inlinequery, bot=updater)
-    dispatcher.add_handler(InlineQueryHandler(inlinequeryfunc))
+    inlinequeryfunc = partial(inlinequery, bots=bots)
+    dispatcher.add_handler(InlineQueryHandler(inlinequeryfunc, run_async=True))
 
     # Start the Bot
     updater.start_polling()
